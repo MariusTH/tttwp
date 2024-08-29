@@ -4,8 +4,13 @@
 
 :root {
   --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+  --background-start-rgb: #dbd8be;
+  --background-end-rgb: #ffffff;
+  --pink: #ffffff;
+  --pink-dark: #c6939a;
+  --tape-gray: #dbd8be;
+  --tape-edge-gray: #b7b49d;
+  --transparent: rgba(255, 255, 255, 0);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,5 +34,11 @@ body {
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  .custom-border-radius {
+    border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  }
+  .custom-border {
+    border: solid 5px hsla(0, 95%, 35%, 1);
   }
 }
