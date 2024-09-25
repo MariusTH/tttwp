@@ -23,14 +23,18 @@ export async function GET(request: Request) {
   const state = searchParams.get('state');
 
   try {
+    console.log("!")
     if (!roomCode || !state) throw new Error('Missing params that are required');
+    console.log("!!")
     if (roomCode?.length !== 6) throw new Error('Param cde not valid');
+    console.log("!!!")
     if (!validState(state)) throw new Error('Param adg not valid');
-    await sql`INSERT INTO TTTWPRooms (RoomCode, State) VALUES (${roomCode}, ${state});`;
+    console.log("!!!!")
+    // await sql`INSERT INTO TTTWPRooms (RoomCode, State) VALUES (${roomCode}, ${state});`;
   } catch (error) {
     return NextResponse.json({ error }, { status: 500 });
   }
  
-  const pets = await sql`SELECT * FROM TTTWPRooms;`;
-  return NextResponse.json({ pets }, { status: 200 });
+  // const pets = await sql`SELECT * FROM TTTWPRooms;`;
+  return NextResponse.json({}, { status: 200 });
 }

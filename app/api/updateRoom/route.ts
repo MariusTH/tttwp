@@ -27,12 +27,12 @@ export async function GET(request: Request) {
     if (!roomCode || !state) throw new Error('Missing params that are required');
     if (roomCode?.length !== 6) throw new Error('Param cde not valid');
     if (!validState(state)) throw new Error('Param adg not valid');
-    await sql`UPDATE TTTWPRooms SET RoomCode=${roomCode}, State=${state} WHERE RoomCode=${roomCode};`;
+    // await sql`UPDATE TTTWPRooms SET RoomCode=${roomCode}, State=${state} WHERE RoomCode=${roomCode};`;
   } catch (error) {
     console.log(error)
     return NextResponse.json({ error }, { status: 500 });
   }
  
-  const pets = await sql`SELECT * FROM TTTWPRooms;`;
-  return NextResponse.json({ pets }, { status: 200 });
+  // const pets = await sql`SELECT * FROM TTTWPRooms;`;
+  return NextResponse.json({ }, { status: 200 });
 }

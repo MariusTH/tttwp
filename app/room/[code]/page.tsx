@@ -1,9 +1,9 @@
 "use client"
-import React, {useState} from "react";
-import useSWR from "swr";
+import React, {useEffect, useState} from "react";
+import { DataConnection, Peer } from "peerjs";
+import { getId } from '@/app/utils'
 
 const ZERO_STATE = [0,0,0,0,0,0,0,0,0]
-const fetcher = (url: any) => fetch(url).then((res) => res.json());
 
 type rs = {
     d: {
@@ -12,9 +12,25 @@ type rs = {
     }
 }
 
-const updateState = (roomCode: string, state: number[]) => {
-    const url = `${process.env.API_URL}/api/updateRoom?roomCode=${roomCode}&state=${state.join()}`
-    fetch(url)
+const IDS: string[] = [];
+const DATA_CONNECTIONS: DataConnection[] = [];
+
+const generateCode = ( length: number ) => {
+    return Array(length).fill('x').join('').replace(/x/g, () => {
+        const r = Math.floor(Math.random() * 36);
+        if (r >= 10) {
+            return String.fromCharCode(r + 55);
+        }
+        return r.toString();
+    })
+}
+
+const updateState = (state: number[]) => {
+    console.log("Updating state");
+    DATA_CONNECTIONS.forEach((conn) => {
+        console.log("Sending data to : ", conn);
+        conn.send({state});
+    })
 }
 
 const getState = (state: string): number[] => {
@@ -63,41 +79,111 @@ const checkWinner = (s: number[]): number => {
     return 0;
 }
 
-const errorPage = () => (
-    <main className="flex min-h-screen flex-col items-center p-24">
-        <h2>An error has occurred. :(</h2>
-    </main>
-);
-
-const loadingPage = () => (
-    <main className="flex min-h-screen flex-col items-center p-24">
-        <h2>Loading...</h2>
-    </main>
-);
-
 const winnerPage = (player: number) => (
     <main className="flex min-h-screen flex-col items-center p-24">
         <h2>{getSymbol(player)} is the winner!</h2>
     </main>
 );
 
+type PeerData = {
+    id?: string;
+    state?: number[];
+};
+
 export default function Page({ params }: { params: { code: string, fallback: any } }) {
-    const { data, error } = useSWR(`/api/getRoom?roomCode=${params.code}`, fetcher, { refreshInterval: 2500 });
-    const [state, setState] = useState<number[]>(ZERO_STATE)
+    const [state, setState] = useState<number[]>()
+    const [local, setLocal] = useState<boolean>();
+    const [peer, setPeer] = useState<Peer>();
 
-    if (error) return errorPage();
-    if (!data) return loadingPage();
+    useEffect(() => {
+        if (local !== undefined) return;
+        const loadedState = localStorage.getItem(getId(params.code));
+        if (loadedState !== null && loadedState !== "") {
+            const loadedNumberState = getState(loadedState);
+            if (loadedNumberState) {
+                setState(loadedNumberState)
+            }
+            setLocal(true)
+        } else {
+            setLocal(false)
+        }
+        console.log('UseEffect', Peer)
+    },[params.code, local]);
 
-    if (!sameState(state, getState((data as rs).d.state))) {
-        setState(getState((data as rs).d.state));
-    }
-    
-    const playersTurn = state.reduce((a,b) => a+b) === 0 ? 1 : -1;
-    const win = checkWinner(state);
+    useEffect(() => {
+        if (peer) return;
+        if (local !== undefined) {
+            if (local) {
+                console.log('Server', Peer)
+                const peer = new Peer(getId(params.code));
+                peer.on("connection", (conn) => {
+                    conn.on("data", (d) => {
+                        const data = d as PeerData;
+                        if (!data.state && !data.id) {
+                            console.error("We recieved data that is not right :(");
+                            return;
+                        }
+                        if (Array.isArray(data.state) && data.state.every(item => typeof item === 'number')) {
+                            let numberArray: number[] = data.state;
+                            if (state && !sameState(state, numberArray))
+                            setState(numberArray)
+                        }
+                        if (data.id) {
+                            IDS.push(data.id);
+                        }
+                    });
+                    conn.on("open", () => {         
+                        conn.send({
+                            id: getId(params.code),
+                            state,
+                        });
+                    });
+                    console.log("Pushing to data conn")
+                    console.log(conn)
+                    DATA_CONNECTIONS.push(conn);
+                    console.log(DATA_CONNECTIONS)
+                });
+                setPeer(peer);
+            } else {
+                const code = generateCode(6)
+                const peer = new Peer(getId(code));
+                peer.on("open", (id) => {
+                    const conn = peer.connect(getId(params.code));
+                    console.log("This is my id : ", id)
+                    conn.on("open", () => {
+                        conn.on("data", (d) => {
+                            console.log("Recieved : ", d)
+                            const data = d as PeerData;
+                            if (!data.state && !data.id) {
+                                console.error("We recieved data that is not right :(");
+                                return;
+                            }
+                            if (Array.isArray(data.state) && data.state.every(item => typeof item === 'number')) {
+                                let numberArray: number[] = data.state;
+                                setState(numberArray)
+                            }
+                            if (data.id) {
+                                IDS.push(data.id);
+                            }
+                        });
+            
+                        conn.send({id})
+                    });
+                    DATA_CONNECTIONS.push(conn);
+                });
+                setPeer(peer);
+            }
+        }
+    }, [local, params.code, state, peer]);
+
+
+
+    const usedState = state ? state : ZERO_STATE;
+    const playersTurn = usedState.reduce((a,b) => a+b) === 0 ? 1 : -1;
+    const win = checkWinner(usedState);
     
     if ( win !== 0) {
         setTimeout(() => {
-            updateState(params.code, ZERO_STATE);
             setState(ZERO_STATE);
           }, 5000)
         return winnerPage(win);
@@ -115,13 +201,13 @@ export default function Page({ params }: { params: { code: string, fallback: any
                             className="p-2 custom-border custom-border-radius aspect-square hover:bg-sky-70 m-0 text-5xl lg:text-9xl"
                             key={`${j}-${i}`}
                             onClick={() => {
-                                const s = [...state];
+                                const s = [...usedState];
                                 s[i*3 + j] = playersTurn;
-                                updateState(params.code, s)
+                                updateState(s)
                                 setState(s)
                             }}
                         >
-                            {`${getSymbol(state[i*3 + j])}`}
+                            {`${getSymbol(usedState[i*3 + j])}`}
                         </button >
                     )
                     }))
