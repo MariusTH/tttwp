@@ -6,6 +6,7 @@ import { MaybeMonad, Monad } from "@/app/monad";
 
 const ZERO_STATE = [0,0,0,0,0,0,0,0,0]
 const DATA_CONNECTIONS: DataConnection[] = [];
+let STATE = ZERO_STATE;
 
 const generateCode = ( length: number ) => {
     return Array(length).fill('x').join('').replace(/x/g, () => {
@@ -103,15 +104,15 @@ const createPeer = (id: string): Peer => {
 
 const setupConnection = (
     conn: DataConnection,
-    state: number[] | undefined,
-    setState: React.Dispatch<React.SetStateAction<number[] | undefined>>, 
+    setState: React.Dispatch<React.SetStateAction<number[] | undefined>>,
+    server: boolean,
 ) => {
     DATA_CONNECTIONS.push(conn);
-    console.log("Setting up : ", conn)
     conn.on("open", () => {
-        console.log("Connection open now")
+        if (server) {
+            sendInitialState(conn);
+        }
         conn.on("data", (d) => {
-            console.log("Recieving data", d);
             const data = d as PeerData;
             if (!data.state) {
                 console.error("We recieved data that is not right :(");
@@ -119,18 +120,14 @@ const setupConnection = (
             }
             if (Array.isArray(data.state) && data.state.every(item => typeof item === 'number')) {
                 let numberArray: number[] = data.state;
-                console.log("State : ", state, "new state: ", numberArray)
-                if (!sameState(state, numberArray)) {
-                    console.log("Setting new state from data")
-                    setState(numberArray)
-                }
+                setState(numberArray)
             }
         });
     })
 }
 
-const sendInitialState = (state: number[] | undefined, conn: DataConnection) => {      
-    conn.send({state});
+const sendInitialState = (conn: DataConnection) => {    
+    conn.send({state: STATE});
 }
 
 const updateCell = (i: number, j: number, playersTurn: 1 | -1) => (state: number[]) => {
@@ -139,67 +136,43 @@ const updateCell = (i: number, j: number, playersTurn: 1 | -1) => (state: number
 }
 
 const getConnection = (
-    state: number[] | undefined,
     setState: React.Dispatch<React.SetStateAction<number[] | undefined>>,
     roomCode?: string,
 ) => (peer: Peer) => {
-    const promise = new Promise<DataConnection>((resolve) => {
-        if(!roomCode) {
-            peer.on("connection", (conn) => {
-                setupConnection(conn, state, setState)
-                sendInitialState(state, conn)
-            })
-        } else {     
-            peer.on("open", () => {
-                const conn = peer.connect(getId(roomCode));
-                setupConnection(conn, state, setState)
-            })
-        }
-    });
-    return promise;
+    if(!roomCode) {
+        peer.on("connection", (conn) => {
+            setupConnection(conn, setState, true)
+        })
+    } else {     
+        peer.on("open", () => {
+            const conn = peer.connect(getId(roomCode));
+            setupConnection(conn, setState, false);
+        })
+    }
+    return peer;
 } 
 
 export default function Page({ params }: { params: { code: string, fallback: any } }) {
     const [state, setState] = useState<number[] | undefined>()
-    const [local, setLocal] = useState<boolean>();
     const [peer, setPeer] = useState<Peer>();
 
     useEffect(() => {
-        if (local !== undefined) return;
+        if (peer !== undefined) return;
         const isLocal = MaybeMonad.of(getId(params.code))
         .map(getLocalState)
         .map((s) => {
             setState(s)
             return s
         }).isSome();
-        console.log("Is local: ", isLocal);
-        setLocal(isLocal)
-        
-    },[params.code, local]);
-
-    useEffect(() => {
-        if (peer || local === undefined) return;
-        Monad.of(local)
+        Monad.of(isLocal)
         .map(getBaseOfId(params.code))
         .map(getId)
         .map(createPeer)
+        .map(getConnection(setState, isLocal ? undefined : params.code))
         .map((peer) => {
             setPeer(peer);
         });
-    }, [local, params.code, peer]);
-
-
-    if(peer && local !== undefined) {
-        Monad.of(peer)
-        .map(getConnection(state, setState, local ? undefined : params.code))
-        .map(async (connPromise) => {
-            const conn = await connPromise;
-            if ( local && state) {
-                sendInitialState(state, conn)
-            }
-            DATA_CONNECTIONS.push(conn);
-        })
-    }
+    },[params.code, peer, state]);
 
     const usedState = state ? state : ZERO_STATE;
     const playersTurn = usedState.reduce((a,b) => a+b) === 0 ? 1 : -1;
@@ -229,6 +202,7 @@ export default function Page({ params }: { params: { code: string, fallback: any
                                 .map((newState) => {
                                     updateState(newState);
                                     setState(newState);
+                                    STATE = newState;
                                 })
                             }}
                         >
