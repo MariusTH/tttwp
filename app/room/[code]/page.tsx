@@ -2,18 +2,11 @@
 import React, {useEffect, useState} from "react";
 import { DataConnection, Peer } from "peerjs";
 import { getId } from '@/app/utils'
+import { MaybeMonad, Monad } from "@/app/monad";
 
 const ZERO_STATE = [0,0,0,0,0,0,0,0,0]
-
-type rs = {
-    d: {
-        roomcode: string,
-        state: string,
-    }
-}
-
-const IDS: string[] = [];
 const DATA_CONNECTIONS: DataConnection[] = [];
+let STATE = ZERO_STATE;
 
 const generateCode = ( length: number ) => {
     return Array(length).fill('x').join('').replace(/x/g, () => {
@@ -49,11 +42,17 @@ const getSymbol = (s: number): string => {
     }
 }
 
-const sameState = (a: number[], b: number[]) => {
-    if (a.length !== 9 || b.length !== 9) return false;
-    for (let i = 0; i < 9; i++) {
-        if(a[i] !== b[i]) {
-            return false;
+const sameState = (a: number[] | undefined, b: number[] | undefined) => {
+    if (!a && b) return false;
+    if (a && !b) return false;
+    if (!a && !b) return true
+
+    if (a && b ) {
+        if (a.length !== 9 || b.length !== 9) return false;
+        for (let i = 0; i < 9; i++) {
+            if(a && b && a[i] !== b[i]) {
+                return false;
+            }
         }
     }
     return true;
@@ -86,97 +85,94 @@ const winnerPage = (player: number) => (
 );
 
 type PeerData = {
-    id?: string;
-    state?: number[];
+    state: number[];
 };
 
+const getLocalState = (id: string) => {
+    const loadedState = localStorage.getItem(id);
+    if (!loadedState) return undefined;
+    return getState(loadedState);
+}
+
+const getBaseOfId = (roomCode: string) => (local: boolean): string => {
+    return local ? roomCode : generateCode(6)
+}
+
+const createPeer = (id: string): Peer => {
+    return new Peer(id);
+}
+
+const setupConnection = (
+    conn: DataConnection,
+    setState: React.Dispatch<React.SetStateAction<number[] | undefined>>,
+    server: boolean,
+) => {
+    DATA_CONNECTIONS.push(conn);
+    conn.on("open", () => {
+        if (server) {
+            sendInitialState(conn);
+        }
+        conn.on("data", (d) => {
+            const data = d as PeerData;
+            if (!data.state) {
+                console.error("We recieved data that is not right :(");
+                return;
+            }
+            if (Array.isArray(data.state) && data.state.every(item => typeof item === 'number')) {
+                let numberArray: number[] = data.state;
+                setState(numberArray)
+            }
+        });
+    })
+}
+
+const sendInitialState = (conn: DataConnection) => {    
+    conn.send({state: STATE});
+}
+
+const updateCell = (i: number, j: number, playersTurn: 1 | -1) => (state: number[]) => {
+    state[i*3 + j] = playersTurn;
+    return state;
+}
+
+const getConnection = (
+    setState: React.Dispatch<React.SetStateAction<number[] | undefined>>,
+    roomCode?: string,
+) => (peer: Peer) => {
+    if(!roomCode) {
+        peer.on("connection", (conn) => {
+            setupConnection(conn, setState, true)
+        })
+    } else {     
+        peer.on("open", () => {
+            const conn = peer.connect(getId(roomCode));
+            setupConnection(conn, setState, false);
+        })
+    }
+    return peer;
+} 
+
 export default function Page({ params }: { params: { code: string, fallback: any } }) {
-    const [state, setState] = useState<number[]>()
-    const [local, setLocal] = useState<boolean>();
+    const [state, setState] = useState<number[] | undefined>()
     const [peer, setPeer] = useState<Peer>();
 
     useEffect(() => {
-        if (local !== undefined) return;
-        const loadedState = localStorage.getItem(getId(params.code));
-        if (loadedState !== null && loadedState !== "") {
-            const loadedNumberState = getState(loadedState);
-            if (loadedNumberState) {
-                setState(loadedNumberState)
-            }
-            setLocal(true)
-        } else {
-            setLocal(false)
-        }
-        console.log('UseEffect', Peer)
-    },[params.code, local]);
-
-    useEffect(() => {
-        if (peer) return;
-        if (local !== undefined) {
-            if (local) {
-                console.log('Server', Peer)
-                const peer = new Peer(getId(params.code));
-                peer.on("connection", (conn) => {
-                    conn.on("data", (d) => {
-                        const data = d as PeerData;
-                        if (!data.state && !data.id) {
-                            console.error("We recieved data that is not right :(");
-                            return;
-                        }
-                        if (Array.isArray(data.state) && data.state.every(item => typeof item === 'number')) {
-                            let numberArray: number[] = data.state;
-                            if (state && !sameState(state, numberArray))
-                            setState(numberArray)
-                        }
-                        if (data.id) {
-                            IDS.push(data.id);
-                        }
-                    });
-                    conn.on("open", () => {         
-                        conn.send({
-                            id: getId(params.code),
-                            state,
-                        });
-                    });
-                    console.log("Pushing to data conn")
-                    console.log(conn)
-                    DATA_CONNECTIONS.push(conn);
-                    console.log(DATA_CONNECTIONS)
-                });
-                setPeer(peer);
-            } else {
-                const code = generateCode(6)
-                const peer = new Peer(getId(code));
-                peer.on("open", (id) => {
-                    const conn = peer.connect(getId(params.code));
-                    console.log("This is my id : ", id)
-                    conn.on("open", () => {
-                        conn.on("data", (d) => {
-                            console.log("Recieved : ", d)
-                            const data = d as PeerData;
-                            if (!data.state && !data.id) {
-                                console.error("We recieved data that is not right :(");
-                                return;
-                            }
-                            if (Array.isArray(data.state) && data.state.every(item => typeof item === 'number')) {
-                                let numberArray: number[] = data.state;
-                                setState(numberArray)
-                            }
-                            if (data.id) {
-                                IDS.push(data.id);
-                            }
-                        });
-            
-                        conn.send({id})
-                    });
-                    DATA_CONNECTIONS.push(conn);
-                });
-                setPeer(peer);
-            }
-        }
-    }, [local, params.code, state, peer]);
-
-
+        if (peer !== undefined) return;
+        const isLocal = MaybeMonad.of(getId(params.code))
+        .map(getLocalState)
+        .map((s) => {
+            setState(s)
+            return s
+        }).isSome();
+        Monad.of(isLocal)
+        .map(getBaseOfId(params.code))
+        .map(getId)
+        .map(createPeer)
+        .map(getConnection(setState, isLocal ? undefined : params.code))
+        .map((peer) => {
+            setPeer(peer);
+        });
+    },[params.code, peer, state]);
 
     const usedState = state ? state : ZERO_STATE;
     const playersTurn = usedState.reduce((a,b) => a+b) === 0 ? 1 : -1;
@@ -201,10 +197,13 @@ export default function Page({ params }: { params: { code: string, fallback: any
                             className="p-2 custom-border custom-border-radius aspect-square hover:bg-sky-70 m-0 text-5xl lg:text-9xl"
                             key={`${j}-${i}`}
                             onClick={() => {
-                                const s = [...usedState];
-                                s[i*3 + j] = playersTurn;
-                                updateState(s)
-                                setState(s)
+                                Monad.of([...usedState])
+                                .map(updateCell(i,j,playersTurn))
+                                .map((newState) => {
+                                    updateState(newState);
+                                    setState(newState);
+                                    STATE = newState;
+                                })
                             }}
                         >
                             {`${getSymbol(usedState[i*3 + j])}`}
