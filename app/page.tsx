@@ -18,8 +18,6 @@ export default function Home() {
   useEffect(() => {
     if(!roomCode) return;
     const startState = "0,0,0,0,0,0,0,0,0"
-    console.log("Hey!")
-    console.log(process.env)
     localStorage.setItem(getId(roomCode), startState);
     redirect(`room/${roomCode}`)
   },[roomCode]);
